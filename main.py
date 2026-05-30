@@ -1,0 +1,349 @@
+import sys
+import json
+import time
+from playwright.sync_api import sync_playwright
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print("Error: Please provide an artist/model name as an argument.", file=sys.stderr)
+        print("Usage: python main.py \"<artist_name>\" [limit]", file=sys.stderr)
+        sys.exit(1)
+
+    # If the last argument is a number, treat it as the limit
+    limit = None
+    if len(args) > 1 and args[-1].isdigit():
+        limit = int(args[-1])
+        artist_name = " ".join(args[:-1]).strip()
+    else:
+        artist_name = " ".join(args).strip()
+
+    print(f'[Init] Searching for albums of: "{artist_name}" on buondua.com...')
+    if limit is not None:
+        print(f'[Init] Processing is limited to the first {limit} albums.')
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--disable-blink-features=AutomationControlled']
+        )
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            viewport={'width': 1280, 'height': 800}
+        )
+        page = context.new_page()
+        page.set_default_timeout(30000)
+
+        try:
+            # 1. Navigate to buondua.com homepage
+            print('[Nav] Opening buondua.com...')
+            try:
+                page.goto('https://buondua.com/', wait_until='domcontentloaded')
+            except Exception as e:
+                print(f'[Nav] Warning: direct navigation had some errors, continuing: {e}')
+
+            # Locate search input
+            print('[Search] Locating search input...')
+            search_input_selector = 'input[type="search"], input[name="search"], input[name="q"], input[placeholder*="search" i], input[placeholder*="Search" i], input[placeholder*="tìm" i]'
+            search_input = None
+            try:
+                page.wait_for_selector(search_input_selector, timeout=6000)
+                search_input = page.query_selector(search_input_selector)
+            except Exception:
+                print('[Search] Search input not found on homepage. Attempting direct search query URL.')
+
+            if search_input:
+                search_input.fill(artist_name)
+                print(f'[Search] Filled search input with "{artist_name}". Submitting search...')
+                try:
+                    with page.expect_navigation(wait_until='networkidle', timeout=35000):
+                        search_input.press('Enter')
+                except Exception:
+                    pass
+            else:
+                search_url = f'https://buondua.com/?search={artist_name}'
+                print(f'[Search] Navigating to search URL: {search_url}')
+                try:
+                    page.goto(search_url, wait_until='networkidle')
+                except Exception as e:
+                    print(f'[Search] Error loading search URL, trying to continue: {e}')
+
+            # 2. Scrape Album Detail Pages (including Pagination)
+            albums = []
+            page_num = 1
+            max_pages = 5
+
+            while page_num <= max_pages:
+                print(f'[Scrape] Crawling list page {page_num}...')
+                page.wait_for_timeout(3000)
+
+                # Extract album links from the current page
+                current_albums = page.evaluate('''() => {
+                    const results = [];
+                    // Selector 1: Grid items or posts
+                    const elements = document.querySelectorAll('.post, .item, .article, .blog-entry, .card, .entry-grid, div.grid > div');
+                    elements.forEach(el => {
+                        const a = el.querySelector('a');
+                        if (a && a.href) {
+                            const titleEl = el.querySelector('h2, h3, .title, .entry-title') || a;
+                            results.push({ title: titleEl.innerText.trim(), href: a.href });
+                        }
+                    });
+
+                    // Selector 2: Fallback
+                    if (results.length === 0) {
+                        const main = document.querySelector('main, #content, #main, .main') || document.body;
+                        const anchors = main.querySelectorAll('a');
+                        anchors.forEach(a => {
+                            const href = a.href;
+                            if (!href) return;
+                            try {
+                                const url = new URL(href);
+                                const path = url.pathname;
+                                if (path === '/' || path.startsWith('/tag/') || path.startsWith('/category/') || path.startsWith('/search') || path.includes('contact') || path.includes('privacy')) {
+                                    return;
+                                }
+                                const pathParts = path.split('/').filter(Boolean);
+                                if (pathParts.length === 1 && pathParts[0].includes('-') && pathParts[0].length > 5) {
+                                    results.push({ title: a.innerText.trim() || pathParts[0], href });
+                                }
+                            } catch (err) {}
+                        });
+                    }
+
+                    // Deduplicate
+                    const unique = [];
+                    const seen = new Set();
+                    for (const item of results) {
+                        if (item.href && !seen.has(item.href)) {
+                            seen.add(item.href);
+                            unique.push(item);
+                        }
+                    }
+                    return unique;
+                }''')
+
+                print(f'[Scrape] Found {len(current_albums)} albums on page {page_num}.')
+                for alb in current_albums:
+                    if not any(a['href'] == alb['href'] for a in albums):
+                        albums.append(alb)
+
+                # Check for next page link
+                next_link = None
+                try:
+                    next_link = page.evaluate('''() => {
+                        const paginationLinks = Array.from(document.querySelectorAll('.pagination-list a, .pagination a, .navigation a, a'));
+                        const next = paginationLinks.find(a => {
+                            const text = a.innerText.trim().toLowerCase();
+                            return text === 'next' || text === '»' || text.includes('next page') || text === 'sau' || a.getAttribute('rel') === 'next';
+                        });
+                        return next ? next.href : null;
+                    }''')
+                except Exception:
+                    pass
+
+                # Handle next page transition safely
+                if next_link and not next_link.startswith('javascript') and next_link != page.url:
+                    print(f'[Nav] Moving to next page URL: {next_link}')
+                    try:
+                        page.goto(next_link, wait_until='networkidle')
+                    except Exception as e:
+                        print(f'[Nav] Warning moving to next page: {e}')
+                    page_num += 1
+                else:
+                    # Try clicking the next page button in case of javascript pagination
+                    clicked = False
+                    try:
+                        next_button = page.query_selector('.pagination-list a.next, .pagination a.next, a.next-page, a[rel="next"]')
+                        if next_button:
+                            print('[Nav] Found next button. Attempting click...')
+                            current_url = page.url
+                            try:
+                                with page.expect_navigation(wait_until='networkidle', timeout=10000):
+                                    next_button.click()
+                                if page.url != current_url:
+                                    clicked = True
+                                    page_num += 1
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                    if not clicked:
+                        print('[Nav] No next page found or navigation failed. List scraping completed.')
+                        break
+
+            print(f'\n[Scrape] Collected a total of {len(albums)} albums to process.')
+            albums_to_process = albums[:limit] if limit is not None else albums
+            if limit is not None and len(albums) > limit:
+                print(f'[Scrape] Truncating to first {limit} albums for processing.')
+
+            # 3. Visit each album and extract download links (MediaFire and TeraBox)
+            processed_albums = []
+
+            for i, album in enumerate(albums_to_process):
+                print(f'\n[Album {i + 1}/{len(albums_to_process)}] Processing: "{album["title"]}"')
+                print(f'[Album {i + 1}/{len(albums_to_process)}] URL: {album["href"]}')
+
+                album_data = {
+                    "title": album["title"],
+                    "url": album["href"],
+                    "mediafire": [],
+                    "terabox": []
+                }
+
+                try:
+                    page.goto(album["href"], wait_until='domcontentloaded')
+                except Exception as e:
+                    print(f'[Album] Warning navigating to details: {e}')
+                page.wait_for_timeout(2000)
+
+                # Scan links inside detail page using unambiguous association
+                found_links = page.evaluate('''() => {
+                    const extracted = [];
+                    const anchors = Array.from(document.querySelectorAll('a'));
+                    anchors.forEach(a => {
+                        const href = a.href || '';
+                        const text = a.innerText.trim().toLowerCase();
+                        
+                        // 1. Direct domain check
+                        if (href.includes('mediafire.com')) {
+                            extracted.push({ href, type: 'MediaFire' });
+                            return;
+                        }
+                        if (
+                            href.includes('terabox.com') ||
+                            href.includes('teraboxapp.com') ||
+                            href.includes('nephobox.com') ||
+                            href.includes('dubox.com') ||
+                            href.includes('freedidi.com')
+                        ) {
+                            extracted.push({ href, type: 'TeraBox' });
+                            return;
+                        }
+
+                        // 2. Anchor text check (most specific)
+                        if (text.includes('mediafire') || text.includes('media fire')) {
+                            extracted.push({ href, type: 'MediaFire' });
+                            return;
+                        }
+                        if (
+                            text.includes('terabox') ||
+                            text.includes('tera box') ||
+                            text.includes('nephobox') ||
+                            text.includes('dubox') ||
+                            text.includes('freedidi')
+                        ) {
+                            extracted.push({ href, type: 'TeraBox' });
+                            return;
+                        }
+
+                        // 3. Parent container check (fallback only if anchor itself has no identifier text)
+                        const parentText = a.parentElement ? a.parentElement.innerText.trim().toLowerCase() : '';
+                        const isMediaFireParent = parentText.includes('mediafire') || parentText.includes('media fire');
+                        const isTeraBoxParent = parentText.includes('terabox') || parentText.includes('tera box') || parentText.includes('nephobox') || parentText.includes('dubox') || parentText.includes('freedidi');
+
+                        // Only fallback to parent container if it is unambiguous (i.e. only one matches)
+                        if (isMediaFireParent && !isTeraBoxParent && href.startsWith('http')) {
+                            extracted.push({ href, type: 'MediaFire' });
+                        } else if (isTeraBoxParent && !isMediaFireParent && href.startsWith('http')) {
+                            extracted.push({ href, type: 'TeraBox' });
+                        }
+                    });
+                    return extracted;
+                }''')
+
+                for link in found_links:
+                    if link['type'] == 'MediaFire' and link['href'] not in album_data['mediafire']:
+                        album_data['mediafire'].append(link['href'])
+                    elif link['type'] == 'TeraBox' and link['href'] not in album_data['terabox']:
+                        album_data['terabox'].append(link['href'])
+
+                # Click download/redirect buttons if no links are directly available
+                if not album_data['mediafire'] and not album_data['terabox']:
+                    buttons_to_click = page.evaluate('''() => {
+                        const buttons = Array.from(document.querySelectorAll('a, button, input[type="button"]'));
+                        return buttons
+                            .map((btn, index) => {
+                                const text = btn.innerText.trim().toLowerCase();
+                                const href = btn.getAttribute('href') || '';
+                                const isDownload = text.includes('download') || text.includes('tải') || text.includes('下载') || text.includes('link') || text.includes('drive') || text.includes('click here');
+                                const isExternal = href.includes('redirect') || href.includes('link') || href.includes('go.buondua.com') || href.includes('download') || href.includes('external');
+                                return { index, text, href, shouldClick: isDownload || isExternal };
+                            })
+                            .filter(b => b.shouldClick);
+                    }''')
+
+                    if buttons_to_click:
+                        print(f"[Album] Found {len(buttons_to_click)} potential download redirectors. Clicking them...")
+                        for btn_info in buttons_to_click:
+                            try:
+                                btns = page.query_selector_all('a, button, input[type="button"]')
+                                if btn_info['index'] < len(btns):
+                                    target_btn = btns[btn_info['index']]
+                                    
+                                    # Set up listener for potential new tab
+                                    with context.expect_page(timeout=6000) as page_info:
+                                        target_btn.click()
+                                    
+                                    new_page = page_info.value
+                                    if new_page:
+                                        print(f"[Album] Opened new tab: {new_page.url}")
+                                        new_page.wait_for_load_state('domcontentloaded')
+                                        new_page.wait_for_timeout(3000)
+
+                                        tab_url = new_page.url
+                                        if 'mediafire.com' in tab_url:
+                                            if tab_url not in album_data['mediafire']:
+                                                album_data['mediafire'].append(tab_url)
+                                        elif any(d in tab_url for d in ['terabox', 'teraboxapp', 'nephobox', 'dubox']):
+                                            if tab_url not in album_data['terabox']:
+                                                album_data['terabox'].append(tab_url)
+                                        else:
+                                            sub_links = new_page.evaluate('''() => {
+                                                const list = [];
+                                                Array.from(document.querySelectorAll('a')).forEach(a => {
+                                                    const href = a.href || '';
+                                                    if (href.includes('mediafire.com')) list.push({ href, type: 'MediaFire' });
+                                                    else if (href.includes('terabox.com') || href.includes('teraboxapp.com') || href.includes('nephobox.com') || href.includes('dubox.com') || href.includes('freedidi.com')) {
+                                                        list.push({ href, type: 'TeraBox' });
+                                                    }
+                                                });
+                                                return list;
+                                            }''')
+                                            for sub in sub_links:
+                                                if sub['type'] == 'MediaFire' and sub['href'] not in album_data['mediafire']:
+                                                    album_data['mediafire'].append(sub['href'])
+                                                elif sub['type'] == 'TeraBox' and sub['href'] not in album_data['terabox']:
+                                                    album_data['terabox'].append(sub['href'])
+                                        new_page.close()
+                                    else:
+                                        current_url = page.url
+                                        if 'mediafire.com' in current_url or any(d in current_url for d in ['terabox', 'teraboxapp', 'nephobox', 'dubox']):
+                                            dtype = 'mediafire' if 'mediafire' in current_url else 'terabox'
+                                            if current_url not in album_data[dtype]:
+                                                album_data[dtype].append(current_url)
+                                            try:
+                                                page.go_back(wait_until='domcontentloaded')
+                                            except Exception:
+                                                pass
+                            except Exception:
+                                pass
+
+                print(f"[Album] Extracted MediaFire links: {album_data['mediafire']}")
+                print(f"[Album] Extracted TeraBox links:   {album_data['terabox']}")
+                processed_albums.append(album_data)
+
+            # 4. Output final results
+            print('\n=================== SEARCH RESULTS ===================')
+            print(json.dumps(processed_albums, indent=2))
+            print('======================================================')
+
+        except Exception as err:
+            print(f'[Error] Scraping workflow failed: {err}', file=sys.stderr)
+        finally:
+            browser.close()
+            print('\n[Done] Scraper finished.')
+
+if __name__ == '__main__':
+    main()
