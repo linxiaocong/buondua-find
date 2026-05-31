@@ -67,10 +67,20 @@ To crawl and retrieve only the first `N` albums (highly useful for quick testing
 python main.py "<artist_name>" <limit>
 ```
 
+### Save Results to a File
+To save the JSON array directly to a file (instead of printing it to stdout):
+
+```bash
+python main.py "<artist_name>" [limit] -o <output_file>
+```
+
 #### Examples:
 ```bash
-# Fetch the 5 most recent albums of yeonyu
+# Fetch the 5 most recent albums of yeonyu and output to stdout
 python main.py "yeonyu" 5
+
+# Fetch the 5 most recent albums of yeonyu and save directly to results.json
+python main.py "yeonyu" 5 -o results.json
 ```
 
 ---

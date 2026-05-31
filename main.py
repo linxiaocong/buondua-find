@@ -5,9 +5,23 @@ from playwright.sync_api import sync_playwright
 
 def main():
     args = sys.argv[1:]
+    
+    # Extract --output or -o option
+    output_file = None
+    if "--output" in args:
+        idx = args.index("--output")
+        if idx + 1 < len(args):
+            output_file = args[idx + 1]
+            args = args[:idx] + args[idx + 2:]
+    elif "-o" in args:
+        idx = args.index("-o")
+        if idx + 1 < len(args):
+            output_file = args[idx + 1]
+            args = args[:idx] + args[idx + 2:]
+
     if not args:
         print("Error: Please provide an artist/model name as an argument.", file=sys.stderr)
-        print("Usage: python main.py \"<artist_name>\" [limit]", file=sys.stderr)
+        print("Usage: python main.py \"<artist_name>\" [limit] [-o <output_file>]", file=sys.stderr)
         sys.exit(1)
 
     # If the last argument is a number, treat it as the limit
@@ -21,6 +35,8 @@ def main():
     print(f'[Init] Searching for albums of: "{artist_name}" on buondua.com...')
     if limit is not None:
         print(f'[Init] Processing is limited to the first {limit} albums.')
+    if output_file:
+        print(f'[Init] Output JSON results will be written to: {output_file}')
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -358,9 +374,17 @@ def main():
                 processed_albums.append(album_data)
 
             # 4. Output final results
-            print('\n=================== SEARCH RESULTS ===================')
-            print(json.dumps(processed_albums, indent=2))
-            print('======================================================')
+            if output_file:
+                try:
+                    with open(output_file, 'w', encoding='utf-8') as f:
+                        json.dump(processed_albums, f, indent=2, ensure_ascii=False)
+                    print(f'\n[Done] Successfully saved results to: {output_file}')
+                except Exception as file_err:
+                    print(f'\n[Error] Failed to save results to {output_file}: {file_err}', file=sys.stderr)
+            else:
+                print('\n=================== SEARCH RESULTS ===================')
+                print(json.dumps(processed_albums, indent=2))
+                print('======================================================')
 
         except Exception as err:
             print(f'[Error] Scraping workflow failed: {err}', file=sys.stderr)

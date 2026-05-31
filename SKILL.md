@@ -15,14 +15,15 @@ This skill enables the agent to search for any model or artist on `buondua.com`,
 To use this skill, execute the scraper script from the root of the project:
 
 ```bash
-python main.py "<artist_name>" [limit]
+python main.py "<artist_name>" [limit] [-o <output_file>]
 ```
 
 ### Options
-You can disable headless mode by setting the `HEADLESS` environment variable to `false`:
+- `-o <output_file>` or `--output <output_file>`: Save the final JSON array directly to the specified file instead of printing it to standard output.
+- You can disable headless mode by setting the `HEADLESS` environment variable to `false`:
 
 ```bash
-$env:HEADLESS="false"; python main.py "<artist_name>" [limit]
+$env:HEADLESS="false"; python main.py "<artist_name>" [limit] [-o <output_file>]
 ```
 
 ## Output Format
