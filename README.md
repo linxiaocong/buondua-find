@@ -7,6 +7,7 @@
 ## 🌟 Features
 
 * **Python & Playwright Sync API:** Powered by the robust synchronous Playwright framework to navigate, interact with dynamic elements, and parse content.
+* **Automatic Cover Extraction & Stamp Stripping:** Extracts the cover image/thumbnail URL for each album and automatically strips any lazy-loading query parameters or hashes (e.g., `?e5a62e...`) to return clean, permanent image links.
 * **Intelligent Redirection Resolver:** Many download links on the target site are wrapped in shortener services (such as `ouo.io`). The scraper maps these redirect links to their corresponding download targets (MediaFire or TeraBox) by analyzing structural context and anchor text metadata.
 * **Unambiguous Multi-Tiered Link Classification:** Prevents classification errors on albums where MediaFire and TeraBox links share the same parent container (e.g. `<div>MediaFire | TeraBox</div>`). It evaluates individual anchor properties (`href`, `innerText`) before falling back on parent containers only when completely unambiguous.
 * **Custom Limit Parameter:** Accepts a limit as a direct command-line argument to quickly check or scrape a subset of albums.
@@ -83,6 +84,7 @@ The scraper will return a clean JSON array representing each crawled album:
   {
     "title": "ag-674-yeonyu-yeon-yu-148-photos-6-videos-ac163970f88e474f688ed3ecbd99709c-54758",
     "url": "https://buondua.com/ag-674-yeonyu-yeon-yu-148-photos-6-videos-ac163970f88e474f688ed3ecbd99709c-54758",
+    "cover": "https://buondua.com/media/albums/ag-674-yeonyu-yeon-yu.jpg",
     "mediafire": [
       "https://ouo.io/tfk361"
     ],

@@ -80,13 +80,30 @@ def main():
                 # Extract album links from the current page
                 current_albums = page.evaluate('''() => {
                     const results = [];
+                    
+                    const getImgSrc = (img) => {
+                        if (!img) return '';
+                        const src = img.src || 
+                                    img.getAttribute('data-src') || 
+                                    img.getAttribute('data-lazy-src') || 
+                                    img.getAttribute('data-original') || 
+                                    img.getAttribute('srcset') || 
+                                    '';
+                        return src ? src.split('?')[0] : '';
+                    };
+
                     // Selector 1: Grid items or posts
                     const elements = document.querySelectorAll('.post, .item, .article, .blog-entry, .card, .entry-grid, div.grid > div');
                     elements.forEach(el => {
                         const a = el.querySelector('a');
                         if (a && a.href) {
                             const titleEl = el.querySelector('h2, h3, .title, .entry-title') || a;
-                            results.push({ title: titleEl.innerText.trim(), href: a.href });
+                            const imgEl = el.querySelector('img');
+                            results.push({ 
+                                title: titleEl.innerText.trim(), 
+                                href: a.href,
+                                cover: getImgSrc(imgEl)
+                            });
                         }
                     });
 
@@ -105,7 +122,12 @@ def main():
                                 }
                                 const pathParts = path.split('/').filter(Boolean);
                                 if (pathParts.length === 1 && pathParts[0].includes('-') && pathParts[0].length > 5) {
-                                    results.push({ title: a.innerText.trim() || pathParts[0], href });
+                                    const imgEl = a.querySelector('img') || (a.parentElement ? a.parentElement.querySelector('img') : null);
+                                    results.push({ 
+                                        title: a.innerText.trim() || pathParts[0], 
+                                        href: href,
+                                        cover: getImgSrc(imgEl)
+                                    });
                                 }
                             } catch (err) {}
                         });
@@ -188,6 +210,7 @@ def main():
                 album_data = {
                     "title": album["title"],
                     "url": album["href"],
+                    "cover": album.get("cover", ""),
                     "mediafire": [],
                     "terabox": []
                 }

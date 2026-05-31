@@ -29,5 +29,7 @@ $env:HEADLESS="false"; python main.py "<artist_name>" [limit]
 The skill prints a JSON array of albums to `stdout`. Each album object contains:
 - `title`: The title of the photo album
 - `url`: The buondua.com album detail page URL
+- `cover`: The URL of the album's cover image / thumbnail (automatically stripped of lazy-loading query parameters/hashes)
 - `mediafire`: An array of extracted MediaFire download links
 - `terabox`: An array of extracted TeraBox download links
+
