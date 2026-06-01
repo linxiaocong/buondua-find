@@ -1,6 +1,6 @@
 # Buondua Album & Download Link Scraper (OpenClaw Skill)
 
-`buondua-find` is a self-contained, high-performance custom **OpenClaw skill** written in **Python** utilizing **Playwright**. It is designed to automatically find all photo albums of a specified model or artist on `buondua.com` and extract their corresponding **MediaFire** and **TeraBox** download links.
+`buondua-find` is a self-contained, high-performance custom **OpenClaw skill** written in **Python** utilizing **Playwright**. It is designed to automatically find all photo albums of a specified model or artist on `buondua.com`, extract their corresponding **MediaFire** and **TeraBox** download links, and retrieve the album **tags** and **cover images**.
 
 ---
 
@@ -8,8 +8,10 @@
 
 * **Python & Playwright Sync API:** Powered by the robust synchronous Playwright framework to navigate, interact with dynamic elements, and parse content.
 * **Automatic Cover Extraction & Stamp Stripping:** Extracts the cover image/thumbnail URL for each album and automatically strips any lazy-loading query parameters or hashes (e.g., `?e5a62e...`) to return clean, permanent image links.
+* **Tag Extraction & Enhanced Logging:** Automatically extracts all related tags and keywords for each album from the detail page, and logs both the album tags and the cover image URL to the terminal during execution.
 * **Intelligent Redirection Resolver:** Many download links on the target site are wrapped in shortener services (such as `ouo.io`). The scraper maps these redirect links to their corresponding download targets (MediaFire or TeraBox) by analyzing structural context and anchor text metadata.
 * **Unambiguous Multi-Tiered Link Classification:** Prevents classification errors on albums where MediaFire and TeraBox links share the same parent container (e.g. `<div>MediaFire | TeraBox</div>`). It evaluates individual anchor properties (`href`, `innerText`) before falling back on parent containers only when completely unambiguous.
+* **Cover Image Downloader Utility:** Includes a generic, standalone utility (`download_covers.py`) to easily download all cover images in sequence-prefixed, sanitized formats.
 * **Custom Limit Parameter:** Accepts a limit as a direct command-line argument to quickly check or scrape a subset of albums.
 * **Robust Pagination:** Detects and parses pagination naturally. Safe guards are implemented to detect `javascript:;` pagination and bypass infinite redirect loops.
 * **JSON Structured Output:** Prints the final results to `stdout` in an easily digestible, standard JSON format.
@@ -25,6 +27,7 @@ c:\Users\charl\Desktop\buondua-find\
 ├── README.md                           # Skill introduction and documentation (this file)
 ├── SKILL.md                            # OpenClaw custom skill manifest
 ├── main.py                             # Core Python scraper logic
+├── download_covers.py                  # Standalone script to download album covers
 └── requirements.txt                    # Python dependencies (Playwright)
 ```
 
@@ -51,36 +54,59 @@ python -m playwright install chromium
 
 ## 💻 Usage
 
+### 1. Scraping Albums
 Run the script from the root directory, passing the artist name as an argument.
 
-### Get All Albums
+#### Get All Albums
 To crawl and retrieve all albums for a model without an upper limit:
 
 ```bash
 python main.py "<artist_name>"
 ```
 
-### Get Albums with a Limit
+#### Get Albums with a Limit
 To crawl and retrieve only the first `N` albums (highly useful for quick testing or checking recent uploads):
 
 ```bash
 python main.py "<artist_name>" <limit>
 ```
 
-### Save Results to a File
+#### Save Results to a File
 To save the JSON array directly to a file (instead of printing it to stdout):
 
 ```bash
 python main.py "<artist_name>" [limit] -o <output_file>
 ```
 
-#### Examples:
+##### Examples:
 ```bash
 # Fetch the 5 most recent albums of yeonyu and output to stdout
 python main.py "yeonyu" 5
 
 # Fetch the 5 most recent albums of yeonyu and save directly to results.json
 python main.py "yeonyu" 5 -o results.json
+```
+
+---
+
+### 2. Downloading Album Covers (Optional)
+Once you have generated a JSON results file using `main.py`, you can download all listed cover/thumbnail images using `download_covers.py`:
+
+```bash
+python download_covers.py <json_file> [-d <output_dir>]
+```
+
+#### Options
+- **json_file**: Path to the JSON results from the scraper (e.g. `results.json`).
+- **-d / --dir**: Target directory to download the covers to. If omitted, a folder named `<json_name>_covers` will automatically be created and used.
+
+##### Examples:
+```bash
+# Download covers from results.json into the default folder 'results_covers'
+python download_covers.py results.json
+
+# Download covers from results.json into a specific folder 'my_covers'
+python download_covers.py results.json -d my_covers
 ```
 
 ---
@@ -95,6 +121,11 @@ The scraper will return a clean JSON array representing each crawled album:
     "title": "ag-674-yeonyu-yeon-yu-148-photos-6-videos-ac163970f88e474f688ed3ecbd99709c-54758",
     "url": "https://buondua.com/ag-674-yeonyu-yeon-yu-148-photos-6-videos-ac163970f88e474f688ed3ecbd99709c-54758",
     "cover": "https://buondua.com/media/albums/ag-674-yeonyu-yeon-yu.jpg",
+    "tags": [
+      "yeonyu",
+      "Korean",
+      "Gravure"
+    ],
     "mediafire": [
       "https://ouo.io/tfk361"
     ],

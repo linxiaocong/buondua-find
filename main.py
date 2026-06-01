@@ -3,6 +3,19 @@ import json
 import time
 from playwright.sync_api import sync_playwright
 
+# Reconfigure stdout/stderr to use UTF-8 to prevent encoding crashes on Windows terminals
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
+import re
+
+def normalize_text(text):
+    if not text:
+        return ""
+    return re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', '', text).lower()
+
 def main():
     args = sys.argv[1:]
     
@@ -108,26 +121,24 @@ def main():
                         return src ? src.split('?')[0] : '';
                     };
 
-                    // Selector 1: Grid items or posts
-                    const elements = document.querySelectorAll('.post, .item, .article, .blog-entry, .card, .entry-grid, div.grid > div');
-                    elements.forEach(el => {
-                        const a = el.querySelector('a');
-                        if (a && a.href) {
-                            const titleEl = el.querySelector('h2, h3, .title, .entry-title') || a;
-                            const imgEl = el.querySelector('img');
-                            results.push({ 
-                                title: titleEl.innerText.trim(), 
-                                href: a.href,
-                                cover: getImgSrc(imgEl)
-                            });
-                        }
-                    });
+                    const mainContent = document.querySelector('.column.is-9, .column.is-8, .column.is-three-quarters, .column.is-two-thirds, .main-content, #main-content') || document.querySelector('main, #content') || document.body;
+                    const allGrids = Array.from(mainContent.querySelectorAll('.columns.is-multiline, div.grid, .posts, .articles'));
 
-                    // Selector 2: Fallback
-                    if (results.length === 0) {
-                        const main = document.querySelector('main, #content, #main, .main') || document.body;
-                        const anchors = main.querySelectorAll('a');
-                        anchors.forEach(a => {
+                    // Exclude grids that are inside a <footer> element or whose parent class contains "footer"
+                    const isInsideFooter = (el) => {
+                        let node = el;
+                        while (node && node !== document.body) {
+                            if (node.tagName === 'FOOTER') return true;
+                            if (node.className && typeof node.className === 'string' && node.className.includes('footer')) return true;
+                            node = node.parentElement;
+                        }
+                        return false;
+                    };
+                    const grids = allGrids.filter(g => !isInsideFooter(g));
+                    const targetContainers = grids.length > 0 ? grids : [mainContent];
+
+                    targetContainers.forEach(container => {
+                        container.querySelectorAll('a').forEach(a => {
                             const href = a.href;
                             if (!href) return;
                             try {
@@ -147,7 +158,7 @@ def main():
                                 }
                             } catch (err) {}
                         });
-                    }
+                    });
 
                     // Deduplicate
                     const unique = [];
@@ -222,11 +233,13 @@ def main():
             for i, album in enumerate(albums_to_process):
                 print(f'\n[Album {i + 1}/{len(albums_to_process)}] Processing: "{album["title"]}"')
                 print(f'[Album {i + 1}/{len(albums_to_process)}] URL: {album["href"]}')
+                print(f'[Album {i + 1}/{len(albums_to_process)}] Cover URL: {album.get("cover", "")}')
 
                 album_data = {
                     "title": album["title"],
                     "url": album["href"],
                     "cover": album.get("cover", ""),
+                    "tags": [],
                     "mediafire": [],
                     "terabox": []
                 }
@@ -238,7 +251,11 @@ def main():
                 page.wait_for_timeout(2000)
 
                 # Scan links inside detail page using unambiguous association
-                found_links = page.evaluate('''() => {
+                detail_data = page.evaluate('''() => {
+                    const tags = Array.from(document.querySelectorAll('a[href*="/tag/"]'))
+                        .map(a => a.innerText.trim())
+                        .filter((v, i, self) => v && self.indexOf(v) === i);
+
                     const extracted = [];
                     const anchors = Array.from(document.querySelectorAll('a'));
                     anchors.forEach(a => {
@@ -289,9 +306,13 @@ def main():
                             extracted.push({ href, type: 'TeraBox' });
                         }
                     });
-                    return extracted;
+                    return { tags, links: extracted };
                 }''')
 
+                album_data['tags'] = detail_data.get('tags', [])
+                print(f"[Album] Tags: {album_data['tags']}")
+
+                found_links = detail_data.get('links', [])
                 for link in found_links:
                     if link['type'] == 'MediaFire' and link['href'] not in album_data['mediafire']:
                         album_data['mediafire'].append(link['href'])
@@ -371,7 +392,20 @@ def main():
 
                 print(f"[Album] Extracted MediaFire links: {album_data['mediafire']}")
                 print(f"[Album] Extracted TeraBox links:   {album_data['terabox']}")
-                processed_albums.append(album_data)
+
+                # CJK-aware relevance check
+                # Also check the URL slug — display titles may use CJK while slugs always use romanized names
+                norm_artist = normalize_text(artist_name)
+                norm_title = normalize_text(album_data["title"])
+                norm_tags = [normalize_text(tag) for tag in album_data["tags"]]
+                norm_slug = normalize_text(album_data["url"].split('/')[-1])
+
+                is_relevant = (norm_artist in norm_title) or any(norm_artist in tag for tag in norm_tags) or (norm_artist in norm_slug)
+
+                if is_relevant:
+                    processed_albums.append(album_data)
+                else:
+                    print(f"[Filter] Excluding irrelevant search result: \"{album_data['title']}\"")
 
             # 4. Output final results
             if output_file:
