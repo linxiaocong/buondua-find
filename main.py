@@ -78,14 +78,73 @@ def main():
 
         try:
             if search_by_tag:
-                # Tag mode: navigate directly to tag page
-                tag_slug = artist_name.lower().replace(' ', '-')
-                tag_url = f'https://buondua.com/tag/{tag_slug}'
-                print(f'[Nav] Opening tag page: {tag_url}')
+                # Tag mode: resolve the full tag URL (includes numeric ID, e.g. /tag/hina-11388)
+                # Step 1: search for the tag name to find albums that contain this tag
+                tag_query = artist_name.lower().replace(' ', '-')
+                search_url = f'https://buondua.com/?search={tag_query}'
+                print(f'[Tag] Searching for "{artist_name}" to resolve tag URL...')
                 try:
-                    page.goto(tag_url, wait_until='domcontentloaded')
+                    page.goto(search_url, wait_until='domcontentloaded')
                 except Exception as e:
-                    print(f'[Nav] Warning: tag page navigation had some errors, continuing: {e}')
+                    print(f'[Tag] Warning: search navigation error, continuing: {e}')
+                page.wait_for_timeout(3000)
+
+                # Step 2: find the first album link from search results
+                first_album_url = page.evaluate('''() => {
+                    const mainContent = document.querySelector('.column.is-9, .column.is-8, .column.is-three-quarters, .column.is-two-thirds, .main-content, #main-content') || document.querySelector('main, #content') || document.body;
+                    const anchors = mainContent.querySelectorAll('a');
+                    for (const a of anchors) {
+                        try {
+                            const path = new URL(a.href).pathname;
+                            const parts = path.split('/').filter(Boolean);
+                            if (parts.length === 1 && parts[0].includes('-') && parts[0].length > 5
+                                && !path.startsWith('/tag/') && !path.startsWith('/category/')) {
+                                return a.href;
+                            }
+                        } catch(e) {}
+                    }
+                    return null;
+                }''')
+
+                tag_url = None
+                if first_album_url:
+                    # Step 3: visit the first album detail page to find the actual tag link
+                    print(f'[Tag] Visiting first result to resolve tag URL: {first_album_url}')
+                    try:
+                        page.goto(first_album_url, wait_until='domcontentloaded')
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(2000)
+
+                    tag_url = page.evaluate('''(tagName) => {
+                        const norm = tagName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const tagLinks = Array.from(document.querySelectorAll('a[href*="/tag/"]'));
+                        for (const a of tagLinks) {
+                            const text = a.innerText.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+                            if (text === norm) return a.href;
+                        }
+                        // Fallback: partial match
+                        for (const a of tagLinks) {
+                            const text = a.innerText.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+                            if (text.includes(norm) || norm.includes(text)) return a.href;
+                        }
+                        return null;
+                    }''', artist_name)
+
+                if tag_url:
+                    print(f'[Tag] Resolved tag URL: {tag_url}')
+                    try:
+                        page.goto(tag_url, wait_until='domcontentloaded')
+                    except Exception as e:
+                        print(f'[Tag] Warning: tag page navigation error, continuing: {e}')
+                else:
+                    # Fallback: try direct slug (may work for some tags without numeric IDs)
+                    tag_url = f'https://buondua.com/tag/{tag_query}'
+                    print(f'[Tag] Could not resolve tag URL, trying direct: {tag_url}')
+                    try:
+                        page.goto(tag_url, wait_until='domcontentloaded')
+                    except Exception as e:
+                        print(f'[Tag] Warning: tag page navigation error, continuing: {e}')
             else:
                 # Search mode: navigate to homepage and use search input
                 print('[Nav] Opening buondua.com...')
