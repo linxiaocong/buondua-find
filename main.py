@@ -32,9 +32,19 @@ def main():
             output_file = args[idx + 1]
             args = args[:idx] + args[idx + 2:]
 
+    # Extract --tag or -t flag
+    search_by_tag = False
+    if "--tag" in args:
+        search_by_tag = True
+        args.remove("--tag")
+    elif "-t" in args:
+        search_by_tag = True
+        args.remove("-t")
+
     if not args:
-        print("Error: Please provide an artist/model name as an argument.", file=sys.stderr)
+        print("Error: Please provide an artist/model name or tag as an argument.", file=sys.stderr)
         print("Usage: python main.py \"<artist_name>\" [limit] [-o <output_file>]", file=sys.stderr)
+        print("       python main.py --tag \"<tag_name>\" [limit] [-o <output_file>]", file=sys.stderr)
         sys.exit(1)
 
     # If the last argument is a number, treat it as the limit
@@ -45,7 +55,10 @@ def main():
     else:
         artist_name = " ".join(args).strip()
 
-    print(f'[Init] Searching for albums of: "{artist_name}" on buondua.com...')
+    if search_by_tag:
+        print(f'[Init] Searching by tag: "{artist_name}" on buondua.com...')
+    else:
+        print(f'[Init] Searching for albums of: "{artist_name}" on buondua.com...')
     if limit is not None:
         print(f'[Init] Processing is limited to the first {limit} albums.')
     if output_file:
@@ -64,38 +77,48 @@ def main():
         page.set_default_timeout(30000)
 
         try:
-            # 1. Navigate to buondua.com homepage
-            print('[Nav] Opening buondua.com...')
-            try:
-                page.goto('https://buondua.com/', wait_until='domcontentloaded')
-            except Exception as e:
-                print(f'[Nav] Warning: direct navigation had some errors, continuing: {e}')
-
-            # Locate search input
-            print('[Search] Locating search input...')
-            search_input_selector = 'input[type="search"], input[name="search"], input[name="q"], input[placeholder*="search" i], input[placeholder*="Search" i], input[placeholder*="tìm" i]'
-            search_input = None
-            try:
-                page.wait_for_selector(search_input_selector, timeout=6000)
-                search_input = page.query_selector(search_input_selector)
-            except Exception:
-                print('[Search] Search input not found on homepage. Attempting direct search query URL.')
-
-            if search_input:
-                search_input.fill(artist_name)
-                print(f'[Search] Filled search input with "{artist_name}". Submitting search...')
+            if search_by_tag:
+                # Tag mode: navigate directly to tag page
+                tag_slug = artist_name.lower().replace(' ', '-')
+                tag_url = f'https://buondua.com/tag/{tag_slug}'
+                print(f'[Nav] Opening tag page: {tag_url}')
                 try:
-                    with page.expect_navigation(wait_until='networkidle', timeout=35000):
-                        search_input.press('Enter')
-                except Exception:
-                    pass
-            else:
-                search_url = f'https://buondua.com/?search={artist_name}'
-                print(f'[Search] Navigating to search URL: {search_url}')
-                try:
-                    page.goto(search_url, wait_until='networkidle')
+                    page.goto(tag_url, wait_until='domcontentloaded')
                 except Exception as e:
-                    print(f'[Search] Error loading search URL, trying to continue: {e}')
+                    print(f'[Nav] Warning: tag page navigation had some errors, continuing: {e}')
+            else:
+                # Search mode: navigate to homepage and use search input
+                print('[Nav] Opening buondua.com...')
+                try:
+                    page.goto('https://buondua.com/', wait_until='domcontentloaded')
+                except Exception as e:
+                    print(f'[Nav] Warning: direct navigation had some errors, continuing: {e}')
+
+                # Locate search input
+                print('[Search] Locating search input...')
+                search_input_selector = 'input[type="search"], input[name="search"], input[name="q"], input[placeholder*="search" i], input[placeholder*="Search" i], input[placeholder*="tìm" i]'
+                search_input = None
+                try:
+                    page.wait_for_selector(search_input_selector, timeout=6000)
+                    search_input = page.query_selector(search_input_selector)
+                except Exception:
+                    print('[Search] Search input not found on homepage. Attempting direct search query URL.')
+
+                if search_input:
+                    search_input.fill(artist_name)
+                    print(f'[Search] Filled search input with "{artist_name}". Submitting search...')
+                    try:
+                        with page.expect_navigation(wait_until='networkidle', timeout=35000):
+                            search_input.press('Enter')
+                    except Exception:
+                        pass
+                else:
+                    search_url = f'https://buondua.com/?search={artist_name}'
+                    print(f'[Search] Navigating to search URL: {search_url}')
+                    try:
+                        page.goto(search_url, wait_until='networkidle')
+                    except Exception as e:
+                        print(f'[Search] Error loading search URL, trying to continue: {e}')
 
             # 2. Scrape Album Detail Pages (including Pagination)
             albums = []
@@ -393,19 +416,23 @@ def main():
                 print(f"[Album] Extracted MediaFire links: {album_data['mediafire']}")
                 print(f"[Album] Extracted TeraBox links:   {album_data['terabox']}")
 
-                # CJK-aware relevance check
-                # Also check the URL slug — display titles may use CJK while slugs always use romanized names
-                norm_artist = normalize_text(artist_name)
-                norm_title = normalize_text(album_data["title"])
-                norm_tags = [normalize_text(tag) for tag in album_data["tags"]]
-                norm_slug = normalize_text(album_data["url"].split('/')[-1])
-
-                is_relevant = (norm_artist in norm_title) or any(norm_artist in tag for tag in norm_tags) or (norm_artist in norm_slug)
-
-                if is_relevant:
+                # Relevance check: skip for tag mode (tag pages already return exact matches)
+                if search_by_tag:
                     processed_albums.append(album_data)
                 else:
-                    print(f"[Filter] Excluding irrelevant search result: \"{album_data['title']}\"")
+                    # CJK-aware relevance check
+                    # Also check the URL slug — display titles may use CJK while slugs always use romanized names
+                    norm_artist = normalize_text(artist_name)
+                    norm_title = normalize_text(album_data["title"])
+                    norm_tags = [normalize_text(tag) for tag in album_data["tags"]]
+                    norm_slug = normalize_text(album_data["url"].split('/')[-1])
+
+                    is_relevant = (norm_artist in norm_title) or any(norm_artist in tag for tag in norm_tags) or (norm_artist in norm_slug)
+
+                    if is_relevant:
+                        processed_albums.append(album_data)
+                    else:
+                        print(f"[Filter] Excluding irrelevant search result: \"{album_data['title']}\"")
 
             # 4. Output final results
             if output_file:

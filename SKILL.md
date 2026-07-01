@@ -1,10 +1,10 @@
 ---
 name: buondua-find
-description: Find all photo albums of a model or artist on buondua.com, and extract their buondua.com URL, tags, cover image, as well as download links for MediaFire and TeraBox.
+description: Find all photo albums of a model or artist on buondua.com by keyword search or tag, and extract their buondua.com URL, tags, cover image, as well as download links for MediaFire and TeraBox.
 ---
 # buondua-find
 
-This skill enables the agent to search for any model or artist on `buondua.com`, gather all her photo albums, and retrieve the download links (MediaFire and TeraBox) for each album.
+This skill enables the agent to search for any model or artist on `buondua.com` — by keyword search or by exact tag — gather all photo albums, and retrieve the download links (MediaFire and TeraBox) for each album.
 
 ## Requirements
 - Python 3.x installed
@@ -17,10 +17,16 @@ This skill enables the agent to search for any model or artist on `buondua.com`,
 To use this skill, execute the scraper script from the root of the project:
 
 ```bash
+# Keyword search (default)
 python main.py "<artist_name>" [limit] [-o <output_file>]
+
+# Tag search (browse by exact tag)
+python main.py --tag "<tag_name>" [limit] [-o <output_file>]
+python main.py -t "<tag_name>" [limit] [-o <output_file>]
 ```
 
 #### Options
+- **Tag Search**: Pass `--tag` or `-t` to browse by exact tag instead of keyword search. Tag search navigates directly to `buondua.com/tag/<tag>` and skips the relevance filter.
 - **Output File**: Pass `-o <file>` or `--output <file>` to write the final JSON output directly to a file instead of `stdout`.
 - **Headless Mode**: You can disable headless mode by setting the `HEADLESS` environment variable to `false`:
 
