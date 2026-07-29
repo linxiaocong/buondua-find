@@ -12,9 +12,9 @@
 * **Tag Extraction & Enhanced Logging:** Automatically extracts all related tags and keywords for each album from the detail page, and logs both the album tags and the cover image URL to the terminal during execution.
 * **Intelligent Redirection Resolver:** Many download links on the target site are wrapped in shortener services (such as `ouo.io`). The scraper maps these redirect links to their corresponding download targets (MediaFire or TeraBox) by analyzing structural context and anchor text metadata.
 * **Unambiguous Multi-Tiered Link Classification:** Prevents classification errors on albums where MediaFire and TeraBox links share the same parent container (e.g. `<div>MediaFire | TeraBox</div>`). It evaluates individual anchor properties (`href`, `innerText`) before falling back on parent containers only when completely unambiguous.
-* **CJK-Aware Relevance Filter:** In keyword search mode, irrelevant results are automatically excluded using a CJK-aware text normalizer that matches the search term against album titles, tags, and URL slugs.
+* **CJK-Aware Relevance Filter:** In keyword search mode, irrelevant results are automatically excluded using a CJK-aware text normalizer that matches the search term against album titles, tags, and URL slugs. Latin search terms match on whole word boundaries, so `hina` no longer matches `Qiuzi_china` or `Hinata Matsumoto`; CJK terms keep substring matching, since those scripts have no word separators. Percent-encoded slugs are decoded before matching.
 * **Cover Image Downloader Utility:** Includes a generic, standalone utility (`download_covers.py`) to easily download all cover images in sequence-prefixed, sanitized formats.
-* **Custom Limit Parameter:** Accepts a limit as a direct command-line argument to quickly check or scrape a subset of albums.
+* **Custom Limit Parameter:** Accepts a limit as a direct command-line argument to quickly check or scrape a subset of albums. The limit counts albums that pass the relevance filter, so `5` always yields 5 usable results rather than 5 candidates of which some get filtered out.
 * **Robust Pagination:** Detects and parses pagination naturally. Safe guards are implemented to detect `javascript:;` pagination and bypass infinite redirect loops.
 * **JSON Structured Output:** Prints the final results to `stdout` in an easily digestible, standard JSON format.
 
@@ -75,6 +75,8 @@ python main.py -t "<tag_name>" [limit] [-o <output_file>]
 ```
 
 > **Tip:** Tag search skips the relevance filter since tag pages already return exact matches. Use this when keyword search returns too many irrelevant results, or when you know the exact tag name.
+
+> **How tag resolution works:** Tags carry numeric IDs (`/tag/yuuri-rukawa-12592`), which cannot be guessed from the name, so the scraper searches the name, opens the top results, and reads the real tag link off the first album whose tag matches exactly. Multi-word tags work (`--tag "Yuuri Rukawa"`). If nothing matches exactly the closest tag is used with a `[Tag] Warning:`, and if the tag page returns an error the run stops with a non-zero exit code rather than scraping unrelated albums.
 
 #### Save Results to a File
 To save the JSON array directly to a file (instead of printing it to stdout):

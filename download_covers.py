@@ -12,9 +12,28 @@ if hasattr(sys.stdout, 'reconfigure'):
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
+# Windows rejects control characters and trailing dots/spaces, and album titles
+# scraped from innerText can contain newlines.
+MAX_TITLE_LEN = 80
+VALID_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif'}
+
 def sanitize_filename(filename):
     # Remove invalid characters for windows/linux filenames
-    return re.sub(r'[\\/*?:"<>|]', "", filename)
+    cleaned = re.sub(r'[\\/*?:"<>|]', "", filename)
+    # Collapse newlines/tabs/control chars into single spaces
+    cleaned = re.sub(r'[\x00-\x1f\x7f]+', " ", cleaned)
+    cleaned = re.sub(r'\s+', " ", cleaned).strip()
+    # Keep the path comfortably inside the Windows MAX_PATH limit
+    if len(cleaned) > MAX_TITLE_LEN:
+        cleaned = cleaned[:MAX_TITLE_LEN].strip()
+    # Windows silently drops trailing dots and spaces
+    cleaned = cleaned.rstrip(". ")
+    return cleaned or "untitled"
+
+def guess_extension(cover_url):
+    url_filename = cover_url.split('?')[0].split('#')[0].split('/')[-1]
+    ext = os.path.splitext(url_filename)[1].lower()
+    return ext if ext in VALID_IMAGE_EXTS else '.jpg'
 
 def main():
     parser = argparse.ArgumentParser(
@@ -66,18 +85,24 @@ def main():
     }
 
     success_count = 0
+    attempted_count = 0
     for idx, album in enumerate(albums, 1):
         title = album.get('title', f'Album_{idx}')
         cover_url = album.get('cover')
-        
+
         if not cover_url:
             print(f"[Skip {idx}/{len(albums)}] No cover URL for: {title}")
             continue
 
+        if not cover_url.lower().startswith(('http://', 'https://')):
+            print(f"[Skip {idx}/{len(albums)}] Cover URL is not a downloadable http(s) link: {cover_url}")
+            continue
+
+        attempted_count += 1
+
         # Generate a clean filename: Title - original_filename.ext
-        url_filename = cover_url.split('/')[-1]
-        ext = os.path.splitext(url_filename)[1] or '.jpg'
-        
+        ext = guess_extension(cover_url)
+
         clean_title = sanitize_filename(title)
         filename = f"{idx:02d} - {clean_title}{ext}"
         filepath = os.path.join(download_dir, filename)
@@ -106,7 +131,11 @@ def main():
         # Polite delay to prevent hammering the server
         time.sleep(1.5)
 
-    print(f"\n[Done] Successfully downloaded {success_count}/{len(albums)} cover images to '{download_dir}'.")
+    skipped = len(albums) - attempted_count
+    summary = f"\n[Done] Successfully downloaded {success_count}/{attempted_count} cover images to '{download_dir}'."
+    if skipped:
+        summary += f" ({skipped} album(s) skipped with no usable cover URL.)"
+    print(summary)
 
 if __name__ == '__main__':
     main()

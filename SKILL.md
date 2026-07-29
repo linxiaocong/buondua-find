@@ -26,7 +26,7 @@ python main.py -t "<tag_name>" [limit] [-o <output_file>]
 ```
 
 #### Options
-- **Tag Search**: Pass `--tag` or `-t` to browse by exact tag instead of keyword search. Tag search navigates directly to `buondua.com/tag/<tag>` and skips the relevance filter.
+- **Tag Search**: Pass `--tag` or `-t` to browse by exact tag instead of keyword search. Tags have numeric IDs (e.g. `/tag/yuuri-rukawa-12592`), so the tag URL is resolved by searching the name and reading the tag links off the matching albums. If no exact tag matches, the closest one is used and a warning is printed; if the tag page cannot be reached at all, the run stops with an error instead of scraping unrelated albums. Tag search skips the relevance filter.
 - **Output File**: Pass `-o <file>` or `--output <file>` to write the final JSON output directly to a file instead of `stdout`.
 - **Headless Mode**: You can disable headless mode by setting the `HEADLESS` environment variable to `false`:
 
